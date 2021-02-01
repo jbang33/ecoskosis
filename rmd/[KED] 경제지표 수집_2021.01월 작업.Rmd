@@ -1,0 +1,311 @@
+---
+title: "경제지표 수집_2021년 01월 작업"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 환경설정 및 데이터 로드
+```{r}
+devtools::install_github("jbang33/ecoskosis")
+```
+
+```{r}
+# ECOS/KOSIS로부터 발급받은 개인 key 사용
+ecos_api_key <- 'Put your api key from ECOS'
+kosis_api_key <- 'Put your api key from KOSIS'
+```
+
+
+# 사용 데이터
+```{r}
+#-- KOSIS로부터 수집되는 RF_YN/ 통계표 이름/ 테이블명(K.ED기준)/ 통계 코드/ url
+kosis_stat_nm_tbl
+
+#-- ECOS로부터 수집되는 RF_YN/ 테이블명(K.ED기준)/ 통계 코드/ 주기
+ecos_target_stat
+
+
+#-- KOSIS 기준 수집 데이터의 KEY table
+kosis_api_key_tbl_202009ver
+
+#-- ECOS 기준 수집 데이터의 KEY table
+ecos_api_key_tbl_202009ver
+
+
+#-- 추가 데이터 수집을 위한 KEY table
+K01_extra_api_key_tbl_202007ver
+
+
+#-- 최종 엑셀 파일 형태로의 핸들링을 위한 KEY table
+excel_ref_tbl
+
+```
+
+### 참조) 변경 사항
+#### 6월 작업 내용 
+- K065 발주자별 건설수주액(계절조정) 테이블 삭제
+  --> 해당 내용 반영함 -> kosis_stat_nm_tbl_v1
+- E125 테이블 통계코드 변경됨 (20200623)
+  --> 해당 내용 반영함 -> ecos_target_stat_v1
+
+
+# API DATA 수집 
+## KOSIS 기준
+```{r}
+#get_processed_kosis_api_db <- function(start_date, end_date, kosis_api_key){
+#}
+
+k_stat_list <- kosis_stat_nm_tbl %>%
+  filter(stat_id != "non") %>%
+  select(stat_id) %>% unname() %>% as_vector()
+
+kosis_api_db_202006_202011 <- kosis_get_api_db(kosis_api_key, start_date = 202006, end_date = 202011, k_stat_list) %>% 
+  select(TBL_ID, RF_YN, ITM_NM, ITM_ID, starts_with("C"), starts_with("20")) %>%
+  mutate(CYCLE = "MM")
+
+# Error 사유 체크
+kosis_api_db_202006_202011 %>%
+  filter(TBL_ID == "Error") %>% 
+  select(ITM_NM)
+
+error_rfyn_202101 <- kosis_api_db_202006_202011 %>%
+  filter(TBL_ID == "Error") %>%
+  select(RF_YN) %>% unname() %>% as_vector()
+
+kosis_stat_nm_tbl %>%
+  filter(RF_YN %in% error_rfyn_202101)
+
+error_stat_id <- kosis_stat_nm_tbl %>%
+  filter(RF_YN %in% error_rfyn_202101) %>% select(stat_id) %>% unname() %>% as_vector()
+
+kosis_api_db_202006_202011_sub <- kosis_get_api_db(kosis_api_key, start_date = 202006, end_date = 202010, error_stat_id) #가장 최근월 자료가 없는 것
+
+kosis_api_db_202006_202011_sub %>% filter(TBL_ID == "Error")
+# 202005 자료 업데이트 안 됨.. #"K082" "K086" "K089"
+# 202006 자료 업데이트 안 됨.. #"K086" "K089"
+# 202008 자료 업데이트 안 됨.. #"K086" "K089"
+# 202009 자료 업데이트 안 됨.. #"K086" "K089"
+
+#error_stat_id_2 <- kosis_stat_nm_tbl %>%
+#  filter(RF_YN %in% c("K086", "K089")) %>%
+#  select(stat_id) %>% unname() %>% as_vector()
+
+#kosis_api_db_202006_202011_sub_2 <- kosis_get_api_db(kosis_api_key, start_date = 202006, end_date = 202009, error_stat_id_2) #가장 202008 까지로 한정
+
+#kosis_api_db_202006_202011_sub_2 %>% filter(TBL_ID == "Error")
+# Error 없음을 확인
+
+kosis_api_db_202006_202011_vf <- 
+  kosis_api_db_202006_202011 %>%
+  bind_rows(kosis_api_db_202006_202011_sub) %>%
+  #bind_rows(kosis_api_db_202006_202011_sub_2) %>%
+  select(TBL_ID, RF_YN, ITM_NM, ITM_ID, starts_with("C"), starts_with("20")) %>%
+  mutate(CYCLE = "MM") %>%
+  filter(TBL_ID != "Error") %>% 
+  distinct()
+
+kosis_api_db_202006_202011_vf # A tibble: 39,135 x 23
+# A tibble: 39,142 x 23 : 10월 작업 기준
+# A tibble: 39,142 x 23 : 11월 작업 기준
+# A tibble: 39,141 x 23 : 11월 작업 기준 
+
+kosis_api_db_202101 <- kosis_api_key_tbl_202009ver %>% 
+  select(-ends_with("NM"), -CYCLE) %>% 
+  left_join(kosis_api_db_202006_202011_vf %>%
+              mutate(C1 = ifelse(RF_YN %in% c("K023", "K091"),
+                                 str_pad(C1, side = "left", pad = 0, 4), C1)),
+            by = c("RF_YN", "TBL_ID", "C1", "C2", "C3", "C4", "ITM_ID"))
+
+# 매핑 체크
+kosis_api_db_202101 %>% 
+    filter(is.na(`202006`)) %>% 
+  distinct(RF_YN)
+
+
+kosis_api_db_202101 # 1) KOSIS 기준 OUTPUT 
+#A tibble: 6,797 x 25 : 9월 작업기준
+#A tibble: 6,797 x 25 : 10월 작업기준
+#A tibble: 6,797 x 25 : 11월 작업기준
+#A tibble: 6,797 x 25 : 12월 작업기준
+#A tibble: 6,797 x 25 : 01월 작업기준
+
+# api key 업데이트(필요 시) 
+kosis_api_key_tbl_202101ver <- kosis_api_db_202101 %>% 
+  select(-starts_with("20")) 
+
+#save(kosis_api_key_tbl_202009ver,
+#    file= "data/kosis/kosis_api_key_tbl_202009ver.RData")
+```
+
+
+## ECOS 기준
+```{r}
+ecos_api_db_202006_202011 <-
+  ecos_get_api_db(ecos_api_key, "202006", "202011", ecos_target_stat$STAT_CODE)
+
+# Error 확인
+ecos_api_db_202006_202011 %>%
+  filter(STAT_CODE == "Error") 
+
+# 6개월 형태 테이블로 변경
+ecos_api_db_202006_202011_6mon <- e_handle_api_db(ecos_api_db_202006_202011)
+
+
+# 매핑 체크
+ecos_api_key_tbl_202009ver %>% 
+  left_join(ecos_api_db_202006_202011_6mon, 
+            by = c("RF_YN", "ITEM_CODE1", "ITEM_CODE2", "ITEM_CODE3")) %>%
+  filter(is.na(`202006`)) %>%
+  filter(!is.na(No.)) %>%
+  distinct(RF_YN)  
+#  RF_YN
+#  <chr>
+#1 E006 
+#2 E008 
+#3 E014 
+#4 E017 
+
+
+null_mapped_chk <- ecos_api_key_tbl_202009ver %>% 
+  left_join(ecos_api_db_202006_202011_6mon, 
+            by = c("RF_YN", "ITEM_CODE1", "ITEM_CODE2", "ITEM_CODE3")) %>%
+  filter(is.na(`202006`)) %>%
+  filter(!is.na(No.)) %>%
+  distinct(RF_YN) %>% 
+  unname() %>% as_vector() 
+
+ecos_api_key_tbl_202009ver %>% 
+  left_join(ecos_api_db_202006_202011_6mon, 
+            by = c("RF_YN", "ITEM_CODE1", "ITEM_CODE2", "ITEM_CODE3"))  %>% 
+  filter(RF_YN %in% null_mapped_chk) %>% select(RF_YN, API_NAME2, starts_with("20")) %>% 
+  filter(is.na(`202006`)) 
+## A tibble: 9 x 8  -----> skip하기로 함 (09)
+
+
+ecos_api_db_202101 <- ecos_api_key_tbl_202009ver %>% 
+  select(-STAT_CODE, -STAT_NAME, -starts_with("ITEM_NAME"),
+         -UNIT_NAME, -CYCLE) %>% 
+  left_join(ecos_api_db_202006_202011_6mon, 
+            by = c("RF_YN", 
+                   "ITEM_CODE1", 
+                   "ITEM_CODE2",
+                   "ITEM_CODE3"))
+
+
+ecos_api_db_202101 # 2) ECOS 기준 OUTPUT
+# A tibble: 7,059 x 20: 9월 작업기준
+# A tibble: 7,059 x 20: 11월 작업기준
+# A tibble: 7,059 x 20: 12월 작업기준
+# A tibble: 7,059 x 20: 01월 작업기준
+
+#ecos_api_key_tbl_202009ver <- 
+#  ecos_api_db_202009 %>% 
+#  select(-starts_with("20")) 
+
+#save(ecos_api_key_tbl_202009ver, file= "data/ecos/ecos_api_key_tbl_202009ver.RData")
+```
+
+## API DATA 통합
+```{r}
+# ecos kosis api 데이터 결합（최종）
+merge_ecos_kosis_db <- function(ecos_db, kosis_db){
+  ecos_kosis_output_202101 <- ecos_db %>%
+    mutate(CYCLE = str_sub(CYCLE, 1, 1)) %>% 
+    select(No., RF_YN, ITEM_NAME = ITEM_NAME1, starts_with("20"), SAME_DATA, CYCLE) %>%
+    bind_rows(kosis_db %>%
+                select(No., RF_YN, ITEM_NAME = ITM_NM, starts_with("20"), SAME_DATA, CYCLE)) 
+}
+
+ecos_kosis_output_202101 <- merge_ecos_kosis_db(ecos_db = ecos_api_db_202101,
+                                                kosis_db = kosis_api_db_202101)
+
+
+#ecos_kosis_output_202101 %>% save(file= "output/ecos_kosis_output_202101.RData")
+
+ecos_kosis_output_202101 # 1) + 2) kosis ecos 통합 API OUTPUT
+## A tibble: 13,856 x 11 : 9월 작업기준
+## A tibble: 13,856 x 11 : 10월 작업기준
+## A tibble: 13,856 x 11 : 11월 작업기준
+## A tibble: 13,856 x 11 : 12월 작업기준
+## A tibble: 13,861 x 11 : 01월 작업기준
+```
+
+
+# 전처리
+## 수집되지 않는 항목에 대하여 같은 값 부여 처리 진행
+## 추후 K065 같은 값 부여 필요(현재, 엑셀로 작업 중)
+```{r}
+
+obj_tbl <- ecos_kosis_output_202101
+
+# 함수 정의 필요
+ecos_kosis_output_202101_excel_ver <- 
+  excel_ref_tbl %>% 
+  left_join(obj_tbl %>%
+              select(-SAME_DATA)) %>% 
+  mutate(`202006` = ifelse(SAME_DATA == "T", M201908, `202006`)) %>%
+  mutate(`202007` = ifelse(SAME_DATA == "T", M201908, `202007`)) %>%
+  mutate(`202008` = ifelse(SAME_DATA == "T", M201908, `202008`)) %>% 
+  mutate(`202009` = ifelse(SAME_DATA == "T", M201908, `202009`)) %>% 
+  mutate(`202010` = ifelse(SAME_DATA == "T", M201908, `202010`)) %>%
+  mutate(`202011` = ifelse(SAME_DATA == "T", M201908, `202011`)) %>%
+  select(-M201908) %>% 
+  select(`No.`, RF_YN, ITEM_NAME, starts_with("20"), SAME_DATA, CYCLE) %>% 
+  mutate_all( funs(ifelse(. %in% c("...", "-"), NA, .))) # "...", "-" 인 값 결측 처리
+  
+ 
+
+ecos_kosis_output_202101_excel_ver  # 최종 output 
+# A tibble: 18,601 x 11
+# A tibble: 18,605 x 11 (21.01작업)
+length(ecos_kosis_output_202101_excel_ver$No. %>% unique)
+
+ecos_kosis_output_202101_excel_ver[duplicated(ecos_kosis_output_202101_excel_ver$No.),] %>% distinct(RF_YN)
+ecos_kosis_output_202101_excel_ver %>% filter(RF_YN == 'K086')
+
+ecos_kosis_output_202101_excel_ver #%>% save(file = "output/ecos_kosis_output_202101_excel_ver.RData")
+ecos_kosis_output_202101_excel_ver #%>% write.csv(file = "output/ecos_kosis_output_202011기준.csv", row.names = F, fileEncoding = "cp949")
+
+```
+
+
+
+
+# K01 추가수집
+- 018Y301 수입물가지수
+- 019Y301 수출물가지수
+```{r}
+
+ecos_tbl_extra_import <- 
+  ecos_get_api_db(ecos_api_key, "202006", "202011", "018Y301")
+
+ecos_tbl_extra_export <- 
+  ecos_get_api_db(ecos_api_key, "202006", "202011", "019Y301")
+
+ecos_tbl_extra <- ecos_tbl_extra_import %>% 
+  bind_rows(ecos_tbl_extra_export) %>% 
+  filter(ITEM_CODE2 == "W")
+
+```
+
+ 
+
+```{r}
+#save(K01_extra_api_key_tbl_202007ver, file = 'data/K01_extra_api_key_tbl_202007ver.RData' )
+# 다음달부터 얘가 추가 key
+
+K01_extra_api_key_tbl_202007ver %>% 
+  left_join(ecos_tbl_extra) %>% 
+  filter(is.na(`202006`)) # 매핑 확인
+
+K01_extra_db <- K01_extra_api_key_tbl_202007ver %>% 
+  left_join(ecos_tbl_extra)
+
+K01_extra_db %>% write.csv(file = "output/K01_extra_db_202006_202011.csv", row.names = FALSE ,          fileEncoding = "cp949")
+```
+
