@@ -249,3 +249,15 @@ e_handle_api_db <- function(api_db_tbl){
             'end date : ', end_date, sep = ' ', '\n\n'))
   return(out_tbl)
 }
+
+#' merge ecos kosis db
+#' @md
+#' @export
+merge_ecos_kosis_db <- function(ecos_db, kosis_db){
+  ecos_kosis_output_202101 <- ecos_db %>%
+    mutate(CYCLE = str_sub(CYCLE, 1, 1)) %>%
+    select(No., RF_YN, ITEM_NAME = ITEM_NAME1, starts_with("20"), SAME_DATA, CYCLE) %>%
+    bind_rows(kosis_db %>%
+                select(No., RF_YN, ITEM_NAME = ITM_NM, starts_with("20"), SAME_DATA, CYCLE))
+}
+
